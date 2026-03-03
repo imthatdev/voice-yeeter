@@ -16,6 +16,8 @@
  */
 
 import {
+  ActivityType,
+  type Client,
   PermissionFlagsBits,
   SlashCommandBuilder,
   type ChatInputCommandInteraction,
@@ -28,6 +30,68 @@ type YeetCommand = {
   };
   execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
 };
+
+let activeYeetTimers = 0;
+let pendingKickTargets = 0;
+let rotatePresenceInterval: NodeJS.Timeout | null = null;
+let showSponsorPresence = false;
+
+const SPONSOR_PRESENCE = "iconical.dev/sponsor";
+
+function setKickPresence(client: Client<true>): void {
+  client.user.setActivity(`Going to kick ${pendingKickTargets} user(s)`, {
+    type: ActivityType.Watching,
+  });
+}
+
+function setSponsorPresence(client: Client<true>): void {
+  client.user.setActivity(SPONSOR_PRESENCE, {
+    type: ActivityType.Watching,
+  });
+}
+
+function startPresenceRotation(client: Client<true>): void {
+  if (rotatePresenceInterval) {
+    return;
+  }
+
+  showSponsorPresence = false;
+  setKickPresence(client);
+
+  rotatePresenceInterval = setInterval(() => {
+    if (activeYeetTimers <= 0) {
+      if (rotatePresenceInterval) {
+        clearInterval(rotatePresenceInterval);
+        rotatePresenceInterval = null;
+      }
+      setSponsorPresence(client);
+      return;
+    }
+
+    showSponsorPresence = !showSponsorPresence;
+
+    if (showSponsorPresence) {
+      setSponsorPresence(client);
+    } else {
+      setKickPresence(client);
+    }
+  }, 3000);
+}
+
+function syncPresence(client: Client<true>): void {
+  if (activeYeetTimers > 0) {
+    setKickPresence(client);
+    startPresenceRotation(client);
+    return;
+  }
+
+  if (rotatePresenceInterval) {
+    clearInterval(rotatePresenceInterval);
+    rotatePresenceInterval = null;
+  }
+
+  setSponsorPresence(client);
+}
 
 const command: YeetCommand = {
   data: new SlashCommandBuilder()
@@ -88,8 +152,28 @@ const command: YeetCommand = {
       return;
     }
 
+    let plannedDisconnectCount = 0;
+    for (const channel of guild.channels.cache.values()) {
+      if (!channel.isVoiceBased() || !("members" in channel)) {
+        continue;
+      }
+
+      for (const member of channel.members.values()) {
+        if (!member.user.bot) {
+          plannedDisconnectCount += 1;
+        }
+      }
+    }
+
+    pendingKickTargets += plannedDisconnectCount;
+    activeYeetTimers += 1;
+
+    if (interaction.client.isReady()) {
+      syncPresence(interaction.client);
+    }
+
     await interaction.reply({
-      content: `Timer started. I will yeet all non-bot users from voice channels in ${minutes} minute(s).`,
+      content: `Timer started. I will yeet ${plannedDisconnectCount} non-bot user(s) from voice channels in ${minutes} minute(s).`,
       flags: ["Ephemeral"],
     });
 
@@ -133,6 +217,16 @@ const command: YeetCommand = {
           }
         } catch (error) {
           console.error("Error during yeet timer execution:", error);
+        } finally {
+          activeYeetTimers = Math.max(0, activeYeetTimers - 1);
+          pendingKickTargets = Math.max(
+            0,
+            pendingKickTargets - plannedDisconnectCount,
+          );
+
+          if (interaction.client.isReady()) {
+            syncPresence(interaction.client);
+          }
         }
       })();
     }, delayMs);

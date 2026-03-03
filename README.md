@@ -16,6 +16,9 @@ A TypeScript Discord bot (Node.js 20+) using `discord.js`.
 - Responses:
   - Ephemeral confirmation when timer starts
   - Public message when users are disconnected
+- Activity status:
+  - Shows planned yeet count during the timer
+  - Resets to sponsor status after the yeet completes
 
 ## Tech Stack
 
@@ -112,6 +115,13 @@ Run container:
 
 ```bash
 docker run --rm --env-file .env voice-yeeter:latest
+```
+
+The container entrypoint auto-runs slash command deployment before starting the bot.
+To skip deploy-on-start, set:
+
+```bash
+DEPLOY_COMMANDS_ON_START=false
 ```
 
 ### Docker Compose example

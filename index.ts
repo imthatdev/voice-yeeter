@@ -20,6 +20,7 @@ import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 import {
+  ActivityType,
   Client,
   Collection,
   Events,
@@ -75,6 +76,9 @@ for (const file of commandFiles) {
 }
 
 client.once(Events.ClientReady, (readyClient) => {
+  readyClient.user.setActivity("iconical.dev/sponsor", {
+    type: ActivityType.Watching,
+  });
   console.log(`Logged in as ${readyClient.user.tag}`);
 });
 

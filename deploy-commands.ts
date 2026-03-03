@@ -27,7 +27,7 @@ type DeployableCommand = {
 
 const token = process.env.BOT_TOKEN;
 const clientId = process.env.CLIENT_ID;
-const guildId = process.env.GUILD_ID;
+const guildId = process.env.GUILD_ID?.trim() || undefined;
 
 if (!token || !clientId) {
   console.error(
@@ -58,10 +58,19 @@ for (const file of commandFiles) {
   }
 }
 
+if (commands.length === 0) {
+  console.error(
+    "No slash commands were found to deploy. Ensure commands are compiled to dist/commands.",
+  );
+  process.exit(1);
+}
+
 const rest = new REST({ version: "10" }).setToken(token);
 
 void (async () => {
   try {
+    console.log(`Found ${commands.length} command(s) to deploy.`);
+
     if (guildId) {
       console.log(
         `Refreshing guild application commands for guild ${guildId}...`,
@@ -75,7 +84,9 @@ void (async () => {
 
     console.log("Refreshing global application commands...");
     await rest.put(Routes.applicationCommands(clientId), { body: commands });
-    console.log("Successfully reloaded global application commands.");
+    console.log(
+      "Successfully reloaded global application commands. Global updates can take up to 1 hour to appear in clients.",
+    );
   } catch (error) {
     console.error("Failed to deploy slash commands:", error);
     process.exit(1);
