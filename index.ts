@@ -76,7 +76,7 @@ for (const file of commandFiles) {
 }
 
 client.once(Events.ClientReady, (readyClient) => {
-  readyClient.user.setActivity("iconical.dev/sponsor", {
+  readyClient.user.setActivity("I am the aura, Voice Yeeter-sama >:3", {
     type: ActivityType.Watching,
   });
   console.log(`Logged in as ${readyClient.user.tag}`);

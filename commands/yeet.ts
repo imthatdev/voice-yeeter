@@ -17,10 +17,14 @@
 
 import {
   ActivityType,
+  ChannelType,
   type Client,
+  type Collection,
   PermissionFlagsBits,
   SlashCommandBuilder,
   type ChatInputCommandInteraction,
+  type StageChannel,
+  type VoiceChannel,
 } from "discord.js";
 
 type YeetCommand = {
@@ -34,70 +38,73 @@ type YeetCommand = {
 let activeYeetTimers = 0;
 let pendingKickTargets = 0;
 let rotatePresenceInterval: NodeJS.Timeout | null = null;
-let showSponsorPresence = false;
+let presenceRotationIndex = 0;
 
-const SPONSOR_PRESENCE = "iconical.dev/sponsor";
+const AURA_PRESENCE = "I am the aura, Voice Yeeter-sama >:3";
+const SPONSOR_PRESENCE = "Tip your sama here -> iconical.dev/sponsor";
 
-function setKickPresence(client: Client<true>): void {
-  client.user.setActivity(`Going to kick ${pendingKickTargets} user(s)`, {
-    type: ActivityType.Watching,
-  });
+function getPresenceSequence(): string[] {
+  if (activeYeetTimers > 0) {
+    return [
+      AURA_PRESENCE,
+      `Going to kick ${pendingKickTargets} Human(s) heheh`,
+      SPONSOR_PRESENCE,
+    ];
+  }
+
+  return [AURA_PRESENCE, SPONSOR_PRESENCE];
 }
 
-function setSponsorPresence(client: Client<true>): void {
-  client.user.setActivity(SPONSOR_PRESENCE, {
-    type: ActivityType.Watching,
-  });
+function getTargetVoiceChannels(
+  channels: Collection<string, VoiceChannel | StageChannel>,
+  selectedChannelId?: string,
+): Array<VoiceChannel | StageChannel> {
+  if (selectedChannelId) {
+    const selectedChannel = channels.get(selectedChannelId);
+
+    if (selectedChannel) {
+      return [selectedChannel];
+    }
+
+    return [];
+  }
+
+  return [...channels.values()];
 }
 
-function startPresenceRotation(client: Client<true>): void {
+function applyNextPresence(client: Client<true>): void {
+  const sequence = getPresenceSequence();
+  const nextPresence = sequence[presenceRotationIndex % sequence.length];
+
+  client.user.setActivity(nextPresence, {
+    type: ActivityType.Watching,
+  });
+
+  presenceRotationIndex = (presenceRotationIndex + 1) % sequence.length;
+}
+
+function ensurePresenceRotation(client: Client<true>): void {
   if (rotatePresenceInterval) {
     return;
   }
 
-  showSponsorPresence = false;
-  setKickPresence(client);
-
   rotatePresenceInterval = setInterval(() => {
-    if (activeYeetTimers <= 0) {
-      if (rotatePresenceInterval) {
-        clearInterval(rotatePresenceInterval);
-        rotatePresenceInterval = null;
-      }
-      setSponsorPresence(client);
-      return;
-    }
-
-    showSponsorPresence = !showSponsorPresence;
-
-    if (showSponsorPresence) {
-      setSponsorPresence(client);
-    } else {
-      setKickPresence(client);
-    }
+    applyNextPresence(client);
   }, 3000);
 }
 
 function syncPresence(client: Client<true>): void {
-  if (activeYeetTimers > 0) {
-    setKickPresence(client);
-    startPresenceRotation(client);
-    return;
-  }
+  ensurePresenceRotation(client);
 
-  if (rotatePresenceInterval) {
-    clearInterval(rotatePresenceInterval);
-    rotatePresenceInterval = null;
-  }
-
-  setSponsorPresence(client);
+  presenceRotationIndex = 0;
+  applyNextPresence(client);
 }
 
 const command: YeetCommand = {
   data: new SlashCommandBuilder()
     .setName("yeet")
     .setDescription(
-      "Disconnect all humans from voice channels after a timer :>",
+      "Disconnect humans from a selected voice channel (or all voice channels) after a timer :>",
     )
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
     .addIntegerOption((option) =>
@@ -107,10 +114,17 @@ const command: YeetCommand = {
         .setRequired(true)
         .setMinValue(1)
         .setMaxValue(180),
+    )
+    .addChannelOption((option) =>
+      option
+        .setName("channel")
+        .setDescription("Optional: only yeet users from this voice channel")
+        .addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice),
     ),
 
   async execute(interaction) {
     const minutes = interaction.options.getInteger("minutes", true);
+    const selectedChannel = interaction.options.getChannel("channel");
 
     if (minutes < 1 || minutes > 180) {
       await interaction.reply({
@@ -152,12 +166,32 @@ const command: YeetCommand = {
       return;
     }
 
-    let plannedDisconnectCount = 0;
-    for (const channel of guild.channels.cache.values()) {
-      if (!channel.isVoiceBased() || !("members" in channel)) {
-        continue;
-      }
+    if (
+      selectedChannel &&
+      "guildId" in selectedChannel &&
+      selectedChannel.guildId !== guild.id
+    ) {
+      await interaction.reply({
+        content: "Selected channel must belong to this server.",
+        flags: ["Ephemeral"],
+      });
+      return;
+    }
 
+    const selectedChannelId = selectedChannel?.id;
+    const voiceAndStageChannels = guild.channels.cache.filter(
+      (channel): channel is VoiceChannel | StageChannel =>
+        channel.type === ChannelType.GuildVoice ||
+        channel.type === ChannelType.GuildStageVoice,
+    );
+
+    const targetVoiceChannels = getTargetVoiceChannels(
+      voiceAndStageChannels,
+      selectedChannelId,
+    );
+
+    let plannedDisconnectCount = 0;
+    for (const channel of targetVoiceChannels) {
       for (const member of channel.members.values()) {
         if (!member.user.bot) {
           plannedDisconnectCount += 1;
@@ -172,8 +206,12 @@ const command: YeetCommand = {
       syncPresence(interaction.client);
     }
 
+    const targetSummary = selectedChannel
+      ? `from #${selectedChannel.name}`
+      : "from all voice channels";
+
     await interaction.reply({
-      content: `Timer started. I will yeet ${plannedDisconnectCount} non-bot user(s) from voice channels in ${minutes} minute(s).`,
+      content: `Timer started. I will yeet ${plannedDisconnectCount} non-bot user(s) ${targetSummary} in ${minutes} minute(s).`,
       flags: ["Ephemeral"],
     });
 
@@ -183,12 +221,12 @@ const command: YeetCommand = {
       void (async () => {
         try {
           let disconnectedCount = 0;
+          const liveTargetVoiceChannels = getTargetVoiceChannels(
+            voiceAndStageChannels,
+            selectedChannelId,
+          );
 
-          for (const channel of guild.channels.cache.values()) {
-            if (!channel.isVoiceBased() || !("members" in channel)) {
-              continue;
-            }
-
+          for (const channel of liveTargetVoiceChannels) {
             for (const member of channel.members.values()) {
               if (member.user.bot) {
                 continue;
@@ -212,7 +250,7 @@ const command: YeetCommand = {
           const channel = interaction.channel;
           if (channel && channel.isTextBased() && "send" in channel) {
             await channel.send(
-              `Voice Yeeter activated: disconnected ${disconnectedCount} human(s) from voice channels.`,
+              `Voice Yeeter activated in ${guild.name}: disconnected ${disconnectedCount} human(s) ${targetSummary}.`,
             );
           }
         } catch (error) {
