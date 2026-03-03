@@ -1,0 +1,10 @@
+services:
+  voice-yeeter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: voice-yeeter:local
+    container_name: voice-yeeter
+    restart: unless-stopped
+    env_file:
+      - .env
