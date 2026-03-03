@@ -105,16 +105,28 @@ pnpm dev
 
 ## 4) Docker (single platform)
 
+Hosted image:
+
+```bash
+docker pull iconical/voice-yeeter:latest
+```
+
+Run hosted image:
+
+```bash
+docker run --rm --env-file .env iconical/voice-yeeter:latest
+```
+
 Build image:
 
 ```bash
-docker build -t voice-yeeter:latest .
+docker build -t iconical/voice-yeeter:latest .
 ```
 
 Run container:
 
 ```bash
-docker run --rm --env-file .env voice-yeeter:latest
+docker run --rm --env-file .env iconical/voice-yeeter:latest
 ```
 
 The container entrypoint auto-runs slash command deployment before starting the bot.
@@ -147,12 +159,10 @@ docker buildx inspect --bootstrap
 
 ### Build and push multi-platform image
 
-Replace `YOUR_DOCKERHUB_USER` with your registry namespace.
-
 ```bash
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  -t YOUR_DOCKERHUB_USER/voice-yeeter:latest \
+  -t iconical/voice-yeeter:latest \
   --push \
   .
 ```
