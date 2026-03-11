@@ -20,13 +20,13 @@ import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 import {
-  ActivityType,
   Client,
   Collection,
   Events,
   GatewayIntentBits,
   type ChatInputCommandInteraction,
 } from "discord.js";
+import { syncPresence } from "./lib/yeet-manager";
 
 type CommandModule = {
   data: {
@@ -76,9 +76,7 @@ for (const file of commandFiles) {
 }
 
 client.once(Events.ClientReady, (readyClient) => {
-  readyClient.user.setActivity("I am the aura, Voice Yeeter-sama >:3", {
-    type: ActivityType.Watching,
-  });
+  syncPresence(readyClient);
   console.log(`Logged in as ${readyClient.user.tag}`);
 });
 

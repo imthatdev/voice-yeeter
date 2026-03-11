@@ -16,9 +16,7 @@
  */
 
 import {
-  ActivityType,
   ChannelType,
-  type Client,
   type Collection,
   PermissionFlagsBits,
   SlashCommandBuilder,
@@ -26,6 +24,17 @@ import {
   type StageChannel,
   type VoiceChannel,
 } from "discord.js";
+import {
+  createYeetId,
+  registerYeet,
+  removeYeet,
+  syncPresence,
+} from "../lib/yeet-manager";
+import {
+  buildNoticeComponents,
+  EPHEMERAL_V2_MESSAGE_FLAGS,
+  V2_MESSAGE_FLAGS,
+} from "../lib/yeet-ui";
 
 type YeetCommand = {
   data: {
@@ -34,26 +43,6 @@ type YeetCommand = {
   };
   execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
 };
-
-let activeYeetTimers = 0;
-let pendingKickTargets = 0;
-let rotatePresenceInterval: NodeJS.Timeout | null = null;
-let presenceRotationIndex = 0;
-
-const AURA_PRESENCE = "I am the aura, Voice Yeeter-sama >:3";
-const SPONSOR_PRESENCE = "Tip your sama here -> iconical.dev/sponsor";
-
-function getPresenceSequence(): string[] {
-  if (activeYeetTimers > 0) {
-    return [
-      AURA_PRESENCE,
-      `Going to kick ${pendingKickTargets} Human(s) heheh`,
-      SPONSOR_PRESENCE,
-    ];
-  }
-
-  return [AURA_PRESENCE, SPONSOR_PRESENCE];
-}
 
 function getTargetVoiceChannels(
   channels: Collection<string, VoiceChannel | StageChannel>,
@@ -72,34 +61,6 @@ function getTargetVoiceChannels(
   return [...channels.values()];
 }
 
-function applyNextPresence(client: Client<true>): void {
-  const sequence = getPresenceSequence();
-  const nextPresence = sequence[presenceRotationIndex % sequence.length];
-
-  client.user.setActivity(nextPresence, {
-    type: ActivityType.Watching,
-  });
-
-  presenceRotationIndex = (presenceRotationIndex + 1) % sequence.length;
-}
-
-function ensurePresenceRotation(client: Client<true>): void {
-  if (rotatePresenceInterval) {
-    return;
-  }
-
-  rotatePresenceInterval = setInterval(() => {
-    applyNextPresence(client);
-  }, 3000);
-}
-
-function syncPresence(client: Client<true>): void {
-  ensurePresenceRotation(client);
-
-  presenceRotationIndex = 0;
-  applyNextPresence(client);
-}
-
 const command: YeetCommand = {
   data: new SlashCommandBuilder()
     .setName("yeet")
@@ -113,7 +74,7 @@ const command: YeetCommand = {
         .setDescription("How many minutes to wait before yeeting everyone.")
         .setRequired(true)
         .setMinValue(1)
-        .setMaxValue(180),
+        .setMaxValue(1440),
     )
     .addChannelOption((option) =>
       option
@@ -126,9 +87,9 @@ const command: YeetCommand = {
     const minutes = interaction.options.getInteger("minutes", true);
     const selectedChannel = interaction.options.getChannel("channel");
 
-    if (minutes < 1 || minutes > 180) {
+    if (minutes < 1 || minutes > 1440) {
       await interaction.reply({
-        content: "Minutes must be between 1 and 180.",
+        content: "Minutes must be between 1 and 1440.",
         flags: ["Ephemeral"],
       });
       return;
@@ -199,30 +160,34 @@ const command: YeetCommand = {
       }
     }
 
-    pendingKickTargets += plannedDisconnectCount;
-    activeYeetTimers += 1;
-
-    if (interaction.client.isReady()) {
-      syncPresence(interaction.client);
-    }
-
     const targetSummary = selectedChannel
       ? `from #${selectedChannel.name}`
       : "from all voice channels";
 
+    const createdAt = Date.now();
+    const executeAt = createdAt + minutes * 60 * 1000;
+
+    const yeetId = createYeetId();
+
     await interaction.reply({
-      content: `Timer started. I will yeet ${plannedDisconnectCount} non-bot user(s) ${targetSummary} in ${minutes} minute(s).`,
-      flags: ["Ephemeral"],
+      components: buildNoticeComponents("Yeet scheduled", [
+        `I will yeet **${plannedDisconnectCount}** non-bot user(s) ${targetSummary}.`,
+        `The countdown ends <t:${Math.floor(executeAt / 1000)}:R>.`,
+      ]),
+      flags: EPHEMERAL_V2_MESSAGE_FLAGS,
     });
 
-    const delayMs = minutes * 60 * 1000;
-
-    setTimeout(() => {
+    const timeout = setTimeout(() => {
       void (async () => {
         try {
           let disconnectedCount = 0;
+          const liveVoiceAndStageChannels = guild.channels.cache.filter(
+            (channel): channel is VoiceChannel | StageChannel =>
+              channel.type === ChannelType.GuildVoice ||
+              channel.type === ChannelType.GuildStageVoice,
+          );
           const liveTargetVoiceChannels = getTargetVoiceChannels(
-            voiceAndStageChannels,
+            liveVoiceAndStageChannels,
             selectedChannelId,
           );
 
@@ -249,25 +214,54 @@ const command: YeetCommand = {
 
           const channel = interaction.channel;
           if (channel && channel.isTextBased() && "send" in channel) {
-            await channel.send(
-              `Voice Yeeter activated in ${guild.name}: disconnected ${disconnectedCount} human(s) ${targetSummary}.`,
-            );
+            await channel.send({
+              components: buildNoticeComponents("Voice Yeeter activated", [
+                `Disconnected **${disconnectedCount}** human(s) ${targetSummary}.`,
+                `Server: **${guild.name}**`,
+              ]),
+              flags: V2_MESSAGE_FLAGS,
+            });
           }
         } catch (error) {
           console.error("Error during yeet timer execution:", error);
         } finally {
-          activeYeetTimers = Math.max(0, activeYeetTimers - 1);
-          pendingKickTargets = Math.max(
-            0,
-            pendingKickTargets - plannedDisconnectCount,
-          );
+          if (yeetId) {
+            removeYeet(yeetId);
+          }
 
           if (interaction.client.isReady()) {
             syncPresence(interaction.client);
           }
         }
       })();
-    }, delayMs);
+    }, minutes * 60 * 1000);
+
+    const activeYeet = registerYeet({
+      id: yeetId,
+      guildId: guild.id,
+      guildName: guild.name,
+      channelId: selectedChannelId,
+      channelName: selectedChannel?.name ?? undefined,
+      createdAt,
+      executeAt,
+      minutes,
+      plannedDisconnectCount,
+      startedByUserId: interaction.user.id,
+      startedByTag: interaction.user.tag,
+      timeout,
+    });
+
+    await interaction.editReply({
+      components: buildNoticeComponents("Yeet scheduled", [
+        `I will yeet **${plannedDisconnectCount}** non-bot user(s) ${targetSummary}.`,
+        `The countdown ends <t:${Math.floor(activeYeet.executeAt / 1000)}:R>.`,
+      ]),
+      flags: V2_MESSAGE_FLAGS,
+    });
+
+    if (interaction.client.isReady()) {
+      syncPresence(interaction.client);
+    }
   },
 };
 

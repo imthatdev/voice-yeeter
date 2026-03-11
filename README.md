@@ -6,15 +6,18 @@ A TypeScript Discord bot (Node.js 20+) using `discord.js`.
 
 ## Features
 
-- Slash command: `/yeet`
+- Slash commands: `/yeet`, `/yeets-incoming`, `/okay-dont-yeet`
 - Required option: `minutes` (integer)
-- Validation: `1` to `180`
+- Validation: `1` to `1440` minutes (1 minute to 24 hours)
 - Uses Discord.js voice API: `member.voice.setChannel(null)`
 - Permission checks:
   - User must have **Manage Channels**
   - Bot must have **Move Members**
 - Responses:
-  - Ephemeral confirmation when timer starts
+  - Components V2 container replies instead of embeds
+  - Ephemeral confirmation when a yeet is scheduled
+  - Ephemeral listing of active scheduled yeets in the current server without showing internal IDs
+  - Ephemeral interactive stop flow with a picker menu
   - Public message when users are disconnected
 - Activity status:
   - Shows planned yeet count during the timer
@@ -33,9 +36,14 @@ A TypeScript Discord bot (Node.js 20+) using `discord.js`.
 ```text
 .
 ├── commands/
+│   ├── list.ts
+│   ├── stop.ts
 │   └── yeet.ts
 ├── deploy-commands.ts
 ├── index.ts
+├── lib/
+│   └── yeet-manager.ts
+│   └── yeet-ui.ts
 ├── Dockerfile
 ├── tsconfig.json
 ├── package.json
@@ -188,9 +196,15 @@ docker run --rm --env-file .env voice-yeeter:local
 ## Command Behavior
 
 - `/yeet minutes:5`
-  - Immediately sends an ephemeral timer confirmation.
+  - Immediately sends an ephemeral Components V2 confirmation.
   - After 5 minutes, disconnects every non-bot member from voice channels in the guild.
   - Posts a public summary message with the number of disconnected users.
+- `/yeets-incoming`
+  - Shows all active yeets in the current server.
+  - Includes the target scope, planned disconnect count, and time remaining without exposing internal IDs.
+- `/okay-dont-yeet`
+  - Shows the active yeets in the current server.
+  - Lets you pick one from a select menu to cancel it.
 
 ## Troubleshooting
 
